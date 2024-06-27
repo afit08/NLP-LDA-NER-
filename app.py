@@ -9,7 +9,7 @@ from queue import Queue, Empty
 
 # Initialize the classifier with a specific model
 classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli", revision="c626438")
-summary = pipeline("summarization", model="kabita-choudhary/finetuned-bart-for-conversation-summary")
+summary = pipeline("summarization", model="Falconsai/text_summarization")
 
 stanza.download('en')  # Ensure the resources are downloaded
 
