@@ -8,8 +8,8 @@ from concurrent.futures import ThreadPoolExecutor
 from queue import Queue, Empty
 
 # Initialize the classifier with a specific model
-classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli", revision="c626438")
-summary = pipeline("summarization", model="Falconsai/text_summarization")
+classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli", revision="c626438", device=0)
+summary = pipeline("summarization", model="Falconsai/text_summarization", device=0)
 
 stanza.download('en')  # Ensure the resources are downloaded
 
@@ -21,7 +21,7 @@ result_queue = Queue()
 
 # Function to run the Stanza pipeline in the background
 def stanza_worker():
-    stanza_pipeline = stanza.Pipeline(lang='en', processors='tokenize,ner')
+    stanza_pipeline = stanza.Pipeline(lang='en', processors='tokenize,ner', use_gpu=True, verbose=True)
     while True:
         try:
             text = task_queue.get(timeout=1)
