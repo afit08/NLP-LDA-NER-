@@ -7,21 +7,23 @@ from threading import Thread
 from concurrent.futures import ThreadPoolExecutor
 from queue import Queue, Empty
 
-# Initialize the classifier with a specific model
-classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli", revision="c626438", device=0)
-summary = pipeline("summarization", model="Falconsai/text_summarization", device=0)
-
-stanza.download('en')  # Ensure the resources are downloaded
-
+# Initialize Flask app
 app = Flask(__name__)
+
+# Initialize NLP models
+classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli", device=0)
+summary_model = pipeline("summarization", model="Falconsai/text_summarization", device=0)
+
+# Download Stanza resources
+stanza.download('en')
 
 # Queues for communication with the Stanza thread
 task_queue = Queue()
 result_queue = Queue()
 
-# Function to run the Stanza pipeline in the background
+# Stanza worker thread function
 def stanza_worker():
-    stanza_pipeline = stanza.Pipeline(lang='en', processors='tokenize,ner', use_gpu=True, verbose=True)
+    stanza_pipeline = stanza.Pipeline(lang='en', processors='tokenize,ner', use_gpu=True)
     while True:
         try:
             text = task_queue.get(timeout=1)
@@ -38,7 +40,7 @@ def stanza_worker():
 thread = Thread(target=stanza_worker, daemon=True)
 thread.start()
 
-# Function to perform named entity recognition
+# Named entity recognition function
 def named_entities(translated_text):
     try:
         task_queue.put(translated_text)
@@ -46,14 +48,11 @@ def named_entities(translated_text):
         if isinstance(doc, dict) and "error" in doc:
             raise Exception(doc["error"])
         entities = []
-        for ent in doc.ents:
+        for ent in doc.entities:
             translated_ent = GoogleTranslator(source='auto', target='id').translate(ent.text)
-            if ent.type in ["CARDINAL", "ORDINAL"]:
-                entity_type = "NUMBER"
-            elif ent.type in ["GPE", "LOCATION"]:
+            entity_type = ent.type if ent.type not in ["CARDINAL", "ORDINAL"] else "NUMBER"
+            if ent.type in ["GPE", "LOCATION"]:
                 entity_type = "LOCATION"
-            else:
-                entity_type = ent.type
             entities.append({"text": translated_ent, "type": entity_type})
         return entities
     except Exception as e:
@@ -68,32 +67,29 @@ def nlp():
         return jsonify({'error': 'text is required'}), 400
     
     try:
-        # Translate the text to English once
         translatedENG = GoogleTranslator(source='auto', target='en').translate(text)
         lang_detect = detect_langs(text)
-        
         resultLanguage = [{"lang": lang.lang, "score": lang.prob} for lang in lang_detect]
 
         emotion_labels = ['Angry', 'Sadness', 'Joy', 'Fear']
         hateSpeech_labels = ['Good Speech', 'Hate Speech', 'Neutral']
         newsTopic_labels = ["Politics", "Economy", "Technology", "Health", "Environment", "Science", "Entertainment", "Sports", "Education", "Global Issues"]
-        
-        # Use ThreadPoolExecutor to parallelize the classification tasks
+
         with ThreadPoolExecutor() as executor:
-            emotion_future = executor.submit(classifier, text, emotion_labels, multi_label=True)
-            hateSpeech_future = executor.submit(classifier, text, hateSpeech_labels, multi_label=True)
-            newsTopic_future = executor.submit(classifier, text, newsTopic_labels, multi_label=True)
+            emotion_future = executor.submit(classifier, translatedENG, emotion_labels, multi_label=True)
+            hateSpeech_future = executor.submit(classifier, translatedENG, hateSpeech_labels, multi_label=True)
+            newsTopic_future = executor.submit(classifier, translatedENG, newsTopic_labels, multi_label=True)
 
             emotion = emotion_future.result()
             hateSpeech = hateSpeech_future.result()
             newsTopic = newsTopic_future.result()
-        
+
         resultEmotion = {"emotion": emotion['labels'][0], "score": emotion['scores'][0]}
         resultHateSpeech = {"label": hateSpeech['labels'][0], "score": hateSpeech['scores'][0]}
         resultNewsTopic = {"topic": newsTopic['labels'][0], "score": newsTopic['scores'][0]}
-        
+
         named_entities_result = named_entities(translatedENG)
-        
+
         return jsonify({
             "language": resultLanguage,
             "hate_speech": resultHateSpeech,
@@ -113,7 +109,7 @@ def summaryz():
         if not text:
             return jsonify({'error': 'text is required'}), 400
         
-        result = summary(text)
+        result = summary_model(text)
         
         return jsonify({
             "message": "Summary Conversation",
@@ -121,9 +117,7 @@ def summaryz():
             "data": result
         })
     except Exception as e:
-        return [{
-            "message": str(e),
-            "status": 500,
-            }]
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=6000)
